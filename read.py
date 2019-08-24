@@ -1,6 +1,9 @@
+#!/usr/bin/python3
+
 from struct import unpack
 from datetime import datetime
 import os
+import subprocess
 
 class libHikvision():
     """docstring for libHikvision"""
@@ -156,28 +159,66 @@ class libHikvision():
         self.getFileHeaderForIndexFile()
         return self.getFilesForIndexFile()
 
-    def extractSegmentMP4(self, filePath, cachePath, startOffset, endOffset, resolution=None):
-        with open(filePath, mode='rb') as video_in, open(cachePath, mode='wb') as video_out:
-            video_in.seek(startOffset)
-            while video_in.tell() < endOffset:
-                video_out.write(video_in.read(self.video_len))
+    def extractSegmentMP4(self, indx, cachePath, resolution=None):
+        filePath = self.segments[indx]['cust_filePath']
+        startOffset = self.segments[indx]['startOffset']
+        endOffset = self.segments[indx]['endOffset']
+        h264_file = '{0}/hik_datadir{1[cust_indexFileNum]}_{1[startOffset]}_{1[endOffset]}.h264'.format(cachePath, self.segments[indx])
+        mp4_file = '{0}/hik_datadir{1[cust_indexFileNum]}_{1[startOffset]}_{1[endOffset]}.mp4'.format(cachePath, self.segments[indx])
+        jpg_file = '{0}/hik_datadir{1[cust_indexFileNum]}_{1[startOffset]}_{1[endOffset]}.jpg'.format(cachePath, self.segments[indx])
+        if not os.path.exists(mp4_file):
+            print('{0[cust_filePath]:55} {0[cust_duration]:5} {0[startOffset]:10} {0[endOffset]:10}   {0[cust_startTime]} - {0[cust_endTime]}'.format(
+                self.segments[indx]
+            ))
+            with open(filePath, mode='rb') as video_in, open(h264_file, mode='wb') as video_out:
+                video_in.seek(startOffset)
+                while video_in.tell() < endOffset:
+                    video_out.write(video_in.read(self.video_len))
+
+            # Create MP4
+            if resolution is None:
+                cmd = 'ffmpeg -i {0} -threads auto -c:v copy -c:a none {1} -hide_banner'.format(h264_file, mp4_file)
+            else:
+                cmd = 'avconv -i {0} -threads auto -s {2} -c:a none {1}'.format(h264, mp4_file, resolution)
+            subprocess.call(cmd, shell=True)
+            os.remove(h264_file)
+
+    def extractSegmentJPG(self, indx, cachePath, resolution='480x270'):
+        filePath = self.segments[indx]['cust_filePath']
+        startOffset = self.segments[indx]['startOffset']
+        endOffset = self.segments[indx]['endOffset']
+        h264_file = '{0}/hik_datadir{1[cust_indexFileNum]}_{1[startOffset]}_{1[endOffset]}.h264'.format(cachePath, self.segments[indx])
+        jpg_file = '{0}/hik_datadir{1[cust_indexFileNum]}_{1[startOffset]}_{1[endOffset]}.jpg'.format(cachePath, self.segments[indx])
+        if not os.path.exists(jpg_file):
+            print('{0[cust_filePath]:55} {0[cust_duration]:5} {0[startOffset]:10} {0[endOffset]:10}   {0[cust_startTime]} - {0[cust_endTime]}'.format(
+                self.segments[indx]
+            ))
+            with open(filePath, mode='rb') as video_in, open(h264_file, mode='wb') as video_out:
+                video_in.seek(startOffset)
+                while video_in.tell() < endOffset:
+                    video_out.write(video_in.read(self.video_len))
+
+            # Create JPG
+            jpg_position = self.segments[indx]['cust_duration'] / 2
+            if jpg_position >= 60:
+                jpg_position = 59
+            cmd = 'ffmpeg -ss 00:00:{2} -i {0} -hide_banner -vframes 1 -s {3} {1}'.format(h264_file, jpg_file, jpg_position, resolution)
+            subprocess.call(cmd, shell=True)
+            os.remove(h264_file)
+
 
 
 cameradir = '/home/bkbilly/Desktop/hikvision/'
 hik = libHikvision(cameradir, 'video')
 segments = hik.getSegments()
 
-for segment in segments:
-    print(
-        segment['cust_filePath'],
-        segment['cust_duration'],
-        segment['startOffset'],
-        segment['endOffset'],
-        segment['cust_startTime'],
-        segment['cust_endTime'],
-    )
-print(len(segments))
+for num, segment in enumerate(segments, start=0):
+    print('{0:4}) {1[cust_filePath]:55} {1[cust_duration]:5} {1[startOffset]:10} {1[endOffset]:10}   {1[cust_startTime]} - {1[cust_endTime]}'.format(
+        num,
+        segment
+    ))
 
-hik.extractSegmentMP4('/home/bkbilly/Desktop/hikvision/datadir0/hiv00034.mp4', '/home/bkbilly/Desktop/test.mp4', 30572544, 81727120)
+hik.extractSegmentMP4(379, '/home/bkbilly/Desktop/')
+hik.extractSegmentJPG(379, '/home/bkbilly/Desktop/')
 # for file in hik.getFiles():
 #     print(file)
