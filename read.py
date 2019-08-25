@@ -2,12 +2,14 @@
 
 from struct import unpack
 from datetime import datetime
+from pytz import timezone
 import os
 import subprocess
 
 class libHikvision():
-    """docstring for libHikvision"""
+    """This library parses the Hikvision bin files and is able to extract the required media"""
     def __init__(self, cameradir, asktype='video'):
+        """Inputs a cameradir where the datadirs and the info.bin exist. Can choose between a video or image."""
         self.cameradir = cameradir
         if asktype in ['video', 'mp4']:
             self.indexFile = 'index00.bin'
@@ -28,6 +30,7 @@ class libHikvision():
 
 
     def getNASInfo(self):
+        """Parses the info.bin file for some basic information."""
         info_keys = [
             'serialNumber',
             'MACAddr',
@@ -46,12 +49,14 @@ class libHikvision():
         return self.info
 
     def checkPaths(self):
+        """Checks if the files exist and shows an error"""
         for indexFileNum in range(self.info['DataDirs']):
             fileName = self.cameradir + 'datadir%s/%s' % (indexFileNum, self.indexFile)
             if not os.path.exists(fileName):
                 print('Path not found: ' + fileName)
 
-    def getFileHeaderForIndexFile(self):
+    def getFileHeader(self):
+        """Parses the index file of each datadir for some basic information"""
         header_keys = [
             'modifyTimes',
             'version',
@@ -72,7 +77,11 @@ class libHikvision():
                     unpackformat, byte)))
         return self.header
 
-    def getFilesForIndexFile(self):
+    def getFiles(self):
+        """Parses the index file for each datadir for information about each recorded file"""
+        self.getNASInfo()
+        self.getFileHeader()
+
         files_keys = [
             'fileNo',
             'chan',
@@ -99,7 +108,19 @@ class libHikvision():
                         self.files.append(myfile)
         return self.files
 
-    def getSegmentsForIndexFile(self):
+    def getSegments(self, from_time=None, to_time=None, from_unixtime=None, to_unixtime=None):
+        """
+            Parses index file for information about each recording by providing the exact path with the segment to extract.
+            Can filter to resolve recordings only from the provided datetimes.
+            Datetimes can be either unixtime or datetime.
+        """
+        self.getNASInfo()
+        self.getFileHeader()
+
+        if from_unixtime is not None:
+            from_time = datetime.fromtimestamp(from_unixtime)
+        if to_unixtime is not None:
+            to_time = datetime.fromtimestamp(to_unixtime)
         mask = 0x00000000ffffffff
         segment_keys = [
             'type',
@@ -134,8 +155,10 @@ class libHikvision():
                             unpackformat, byte)))
                         segment['cust_fileNum'] = fileNum
                         segment['cust_indexFileNum'] = indexFileNum
-                        segment['cust_startTime'] = datetime.fromtimestamp(segment['startTime'] & mask)
-                        segment['cust_endTime'] = datetime.fromtimestamp(segment['endTime'] & mask)
+                        segment['startTime'] = segment['startTime']
+                        segment['endTime'] = segment['endTime']
+                        segment['cust_startTime'] = datetime.utcfromtimestamp(segment['startTime']  & mask)
+                        segment['cust_endTime'] = datetime.utcfromtimestamp(segment['endTime'] & mask)
                         segment['duration'] = segment['cust_endTime'] - segment['cust_startTime']
                         segment['cust_duration'] = segment['duration'].total_seconds()
                         fileExtension = 'mp4'
@@ -144,29 +167,32 @@ class libHikvision():
                         segment['cust_filePath'] = '{0}datadir{1}/hiv{2:05d}.{3}'.format(self.cameradir, segment['cust_indexFileNum'], segment['cust_fileNum'], fileExtension)
                         fileName = self.cameradir + 'datadir%s/%s.bin' % (indexFileNum, self.indexFile)
                         if segment['endTime'] != 0:
-                            self.segments.append(segment)
+                            # Filter segments by date
+                            if from_time is None and to_time is None:
+                                self.segments.append(segment)
+                            elif from_time is not None and to_time is None:
+                                if segment['cust_startTime'] > from_time:
+                                    self.segments.append(segment)
+                            elif from_time is None and to_time is not None:
+                                if segment['cust_startTime'] < to_time:
+                                    self.segments.append(segment)
+                            elif from_time is not None and to_time is not None:
+                                if segment['cust_startTime'] > from_time and segment['cust_startTime'] < to_time:
+                                    self.segments.append(segment)
 
+        # Sort by start time
         self.segments.sort(key=lambda item:item['cust_startTime'], reverse=False)
         return self.segments
 
-    def getSegments(self):
-        self.getNASInfo()
-        self.getFileHeaderForIndexFile()
-        return self.getSegmentsForIndexFile()
-
-    def getFiles(self):
-        self.getNASInfo()
-        self.getFileHeaderForIndexFile()
-        return self.getFilesForIndexFile()
-
     def extractSegmentMP4(self, indx, cachePath, resolution=None):
+        """Extracts the segment to an MP4 file in the provided directory"""
         filePath = self.segments[indx]['cust_filePath']
         startOffset = self.segments[indx]['startOffset']
         endOffset = self.segments[indx]['endOffset']
         h264_file = '{0}/hik_datadir{1[cust_indexFileNum]}_{1[startOffset]}_{1[endOffset]}.h264'.format(cachePath, self.segments[indx])
         mp4_file = '{0}/hik_datadir{1[cust_indexFileNum]}_{1[startOffset]}_{1[endOffset]}.mp4'.format(cachePath, self.segments[indx])
-        jpg_file = '{0}/hik_datadir{1[cust_indexFileNum]}_{1[startOffset]}_{1[endOffset]}.jpg'.format(cachePath, self.segments[indx])
         if not os.path.exists(mp4_file):
+            # Extracts the segment to a temporary h264 file
             print('{0[cust_filePath]:55} {0[cust_duration]:5} {0[startOffset]:10} {0[endOffset]:10}   {0[cust_startTime]} - {0[cust_endTime]}'.format(
                 self.segments[indx]
             ))
@@ -175,7 +201,7 @@ class libHikvision():
                 while video_in.tell() < endOffset:
                     video_out.write(video_in.read(self.video_len))
 
-            # Create MP4
+            # Convert the h264 file to mp4
             if resolution is None:
                 cmd = 'ffmpeg -i {0} -threads auto -c:v copy -c:a none {1} -hide_banner'.format(h264_file, mp4_file)
             else:
@@ -184,6 +210,7 @@ class libHikvision():
             os.remove(h264_file)
 
     def extractSegmentJPG(self, indx, cachePath, resolution='480x270'):
+        """Extracts an thumbnail to the provided directory"""
         filePath = self.segments[indx]['cust_filePath']
         startOffset = self.segments[indx]['startOffset']
         endOffset = self.segments[indx]['endOffset']
@@ -210,7 +237,10 @@ class libHikvision():
 
 cameradir = '/home/bkbilly/Desktop/hikvision/'
 hik = libHikvision(cameradir, 'video')
-segments = hik.getSegments()
+segments = hik.getSegments(
+    from_time=datetime(2019, 8, 21, 22, 23, 30),
+    to_time=datetime(2019, 8, 21, 22, 25, 00),
+)
 
 for num, segment in enumerate(segments, start=0):
     print('{0:4}) {1[cust_filePath]:55} {1[cust_duration]:5} {1[startOffset]:10} {1[endOffset]:10}   {1[cust_startTime]} - {1[cust_endTime]}'.format(
@@ -218,7 +248,6 @@ for num, segment in enumerate(segments, start=0):
         segment
     ))
 
-hik.extractSegmentMP4(379, '/home/bkbilly/Desktop/')
-hik.extractSegmentJPG(379, '/home/bkbilly/Desktop/')
+# hik.extractSegmentJPG(2, '/home/bkbilly/Desktop/')
 # for file in hik.getFiles():
 #     print(file)
