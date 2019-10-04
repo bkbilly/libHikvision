@@ -5,7 +5,7 @@ with open("README.md", "r") as fh:
 
 setuptools.setup(
     name='libhikvision',  
-    version='0.3.2',
+    version='0.3.3',
     author="bkbilly",
     author_email="bkbilly@hotmail.com",
     description="Parse Hikvision datadirs that Hikvision IP cameras store the videos",

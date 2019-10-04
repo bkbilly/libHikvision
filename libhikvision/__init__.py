@@ -196,9 +196,9 @@ class libHikvision():
         mp4_file = '{0}/hik_datadir{1[cust_indexFileNum]}_{1[startOffset]}_{1[endOffset]}.mp4'.format(cachePath, self.segments[indx])
         if not os.path.exists(mp4_file):
             # Extracts the segment to a temporary h264 file
-            print('{0[cust_filePath]:55} {0[cust_duration]:5} {0[startOffset]:10} {0[endOffset]:10}   {0[cust_startTime]} - {0[cust_endTime]}'.format(
-                self.segments[indx]
-            ))
+            #print('{0[cust_filePath]:55} {0[cust_duration]:5} {0[startOffset]:10} {0[endOffset]:10}   {0[cust_startTime]} - {0[cust_endTime]}'.format(
+            #    self.segments[indx]
+            #))
             with open(filePath, mode='rb') as video_in, open(h264_file, mode='wb') as video_out:
                 video_in.seek(startOffset)
                 while video_in.tell() < endOffset:
@@ -211,6 +211,7 @@ class libHikvision():
                 cmd = 'avconv -i {0} -threads auto -s {2} -c:a none {1}'.format(h264, mp4_file, resolution)
             subprocess.call(cmd, shell=True)
             os.remove(h264_file)
+        return mp4_file
 
     def extractSegmentJPG(self, indx, cachePath, resolution='480x270'):
         """Extracts an thumbnail to the provided directory"""
@@ -220,9 +221,9 @@ class libHikvision():
         h264_file = '{0}/hik_datadir{1[cust_indexFileNum]}_{1[startOffset]}_{1[endOffset]}.h264'.format(cachePath, self.segments[indx])
         jpg_file = '{0}/hik_datadir{1[cust_indexFileNum]}_{1[startOffset]}_{1[endOffset]}.jpg'.format(cachePath, self.segments[indx])
         if not os.path.exists(jpg_file):
-            print('{0[cust_filePath]:55} {0[cust_duration]:5} {0[startOffset]:10} {0[endOffset]:10}   {0[cust_startTime]} - {0[cust_endTime]}'.format(
-                self.segments[indx]
-            ))
+            #print('{0[cust_filePath]:55} {0[cust_duration]:5} {0[startOffset]:10} {0[endOffset]:10}   {0[cust_startTime]} - {0[cust_endTime]}'.format(
+            #    self.segments[indx]
+            #))
             with open(filePath, mode='rb') as video_in, open(h264_file, mode='wb') as video_out:
                 video_in.seek(startOffset)
                 while video_in.tell() < endOffset:
@@ -235,6 +236,7 @@ class libHikvision():
             cmd = 'ffmpeg -ss 00:00:{2} -i {0} -hide_banner -vframes 1 -s {3} {1}'.format(h264_file, jpg_file, jpg_position, resolution)
             subprocess.call(cmd, shell=True)
             os.remove(h264_file)
+        return jpg_file
 
 
 
