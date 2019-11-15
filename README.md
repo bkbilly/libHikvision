@@ -1,10 +1,12 @@
-# README #
+# LibHikvision
+[![PyPI Version](https://img.shields.io/pypi/v/libHikvision?label=PyPI&logo=pypi)](https://pypi.org/project/libHikvision/)
+
 
 Python library to parse Hikvision datadirs that Hikvision IP cameras store the videos.
 Using this class you can view details about recordings stored in a datadir and extract video and thumbnails.
 
 
-### Working Example ###
+### Working Example
 
 ```python
 #!/usr/bin/python3
@@ -34,7 +36,7 @@ for num, segment in enumerate(segments, start=0):
     print(hik.extractSegmentJPG(num, '/var/tmp/'))
 ```
 
-### Credits ###
+### Credits
 
 Based on Dave Hope's PHP code available at https://github.com/davehope/libHikvision
 
