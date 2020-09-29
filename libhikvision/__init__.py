@@ -219,7 +219,7 @@ class libHikvision():
             os.remove(h264_file)
         return mp4_file
 
-    def extractSegmentJPG(self, indx, cachePath='/var/tmp', filename=None, resolution='480x270', debug=False):
+    def extractSegmentJPG(self, indx, cachePath='/var/tmp', filename=None, resolution='480x270', position=None, debug=False):
         """Extracts an thumbnail to the provided directory"""
         filePath = self.segments[indx]['cust_filePath']
         startOffset = self.segments[indx]['startOffset']
@@ -239,9 +239,11 @@ class libHikvision():
                     video_out.write(video_in.read(self.video_len))
 
             # Create JPG
-            jpg_position = self.segments[indx]['cust_duration'] / 2
-            if jpg_position >= 60:
-                jpg_position = 59
+            jpeg_position = position
+            if position is None:
+                jpg_position = self.segments[indx]['cust_duration'] / 2
+                if jpg_position >= 60:
+                    jpg_position = 59
             cmd = 'ffmpeg -ss 00:00:{2} -i {0} -hide_banner -vframes 1 -s {3} {1}'.format(h264_file, jpg_file, jpg_position, resolution)
             if debug:
                 subprocess.call(cmd, shell=True)
