@@ -187,13 +187,16 @@ class libHikvision():
         self.segments.sort(key=lambda item:item['cust_startTime'], reverse=False)
         return self.segments
 
-    def extractSegmentMP4(self, indx, cachePath, resolution=None):
+    def extractSegmentMP4(self, indx, cachePath='/var/tmp', filename=None, resolution=None, debug=False):
         """Extracts the segment to an MP4 file in the provided directory"""
         filePath = self.segments[indx]['cust_filePath']
         startOffset = self.segments[indx]['startOffset']
         endOffset = self.segments[indx]['endOffset']
         h264_file = '{0}/hik_datadir{1[cust_indexFileNum]}_{1[startOffset]}_{1[endOffset]}.h264'.format(cachePath, self.segments[indx])
-        mp4_file = '{0}/hik_datadir{1[cust_indexFileNum]}_{1[startOffset]}_{1[endOffset]}.mp4'.format(cachePath, self.segments[indx])
+        if filename is None:
+            mp4_file = '{0}/hik_datadir{1[cust_indexFileNum]}_{1[startOffset]}_{1[endOffset]}.mp4'.format(cachePath, self.segments[indx])
+        else:
+            mp4_file = filename
         if not os.path.exists(mp4_file):
             # Extracts the segment to a temporary h264 file
             #print('{0[cust_filePath]:55} {0[cust_duration]:5} {0[startOffset]:10} {0[endOffset]:10}   {0[cust_startTime]} - {0[cust_endTime]}'.format(
@@ -209,17 +212,23 @@ class libHikvision():
                 cmd = 'ffmpeg -i {0} -threads auto -c:v copy -c:a none {1} -hide_banner'.format(h264_file, mp4_file)
             else:
                 cmd = 'avconv -i {0} -threads auto -s {2} -c:a none {1}'.format(h264, mp4_file, resolution)
-            subprocess.call(cmd, shell=True)
+            if debug:
+                subprocess.call(cmd, shell=True)
+            else:
+                subprocess.call(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             os.remove(h264_file)
         return mp4_file
 
-    def extractSegmentJPG(self, indx, cachePath, resolution='480x270'):
+    def extractSegmentJPG(self, indx, cachePath='/var/tmp', filename=None, resolution='480x270', debug=False):
         """Extracts an thumbnail to the provided directory"""
         filePath = self.segments[indx]['cust_filePath']
         startOffset = self.segments[indx]['startOffset']
         endOffset = self.segments[indx]['endOffset']
         h264_file = '{0}/hik_datadir{1[cust_indexFileNum]}_{1[startOffset]}_{1[endOffset]}.h264'.format(cachePath, self.segments[indx])
-        jpg_file = '{0}/hik_datadir{1[cust_indexFileNum]}_{1[startOffset]}_{1[endOffset]}.jpg'.format(cachePath, self.segments[indx])
+        if filename is None:
+            jpg_file = '{0}/hik_datadir{1[cust_indexFileNum]}_{1[startOffset]}_{1[endOffset]}.jpg'.format(cachePath, self.segments[indx])
+        else:
+            jpg_file = filename
         if not os.path.exists(jpg_file):
             #print('{0[cust_filePath]:55} {0[cust_duration]:5} {0[startOffset]:10} {0[endOffset]:10}   {0[cust_startTime]} - {0[cust_endTime]}'.format(
             #    self.segments[indx]
@@ -234,7 +243,10 @@ class libHikvision():
             if jpg_position >= 60:
                 jpg_position = 59
             cmd = 'ffmpeg -ss 00:00:{2} -i {0} -hide_banner -vframes 1 -s {3} {1}'.format(h264_file, jpg_file, jpg_position, resolution)
-            subprocess.call(cmd, shell=True)
+            if debug:
+                subprocess.call(cmd, shell=True)
+            else:
+                subprocess.call(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             os.remove(h264_file)
         return jpg_file
 

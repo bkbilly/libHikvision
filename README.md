@@ -16,14 +16,19 @@ from datetime import datetime
 
 cameradir = '/var/tmp/hikvision/'
 hik = libHikvision(cameradir, 'video')
-segments = hik.getSegments(
-    from_time=datetime(2019, 8, 21, 22, 23, 30),
-    to_time=datetime(2019, 8, 21, 22, 25, 00),
-)
 
 # Gets information about the structure of the files
 for file in hik.getFiles():
     print(file)
+
+# Get information about the server
+print hik.getNASInfo()
+
+# Extract the segments within a specific range of dates
+segments = hik.getSegments(
+    from_time=datetime(2019, 8, 21, 22, 23, 30),
+    to_time=datetime(2019, 8, 21, 22, 25, 00),
+)
 
 # Extract the Videos and Images from segments found above
 for num, segment in enumerate(segments, start=0):
@@ -32,8 +37,8 @@ for num, segment in enumerate(segments, start=0):
         segment
     ))
 
-    print(hik.extractSegmentMP4(num, '/var/tmp/'))
-    print(hik.extractSegmentJPG(num, '/var/tmp/'))
+    print(hik.extractSegmentMP4(num, cachePath='/var/tmp/', filename='/var/tmp/video{0}.mp4'.format(num)))
+    print(hik.extractSegmentJPG(num, cachePath='/var/tmp/', filename='/var/tmp/video{0}.jpg'.format(num)))
 ```
 
 ### Credits
