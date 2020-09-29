@@ -239,7 +239,7 @@ class libHikvision():
                     video_out.write(video_in.read(self.video_len))
 
             # Create JPG
-            jpeg_position = position
+            jpg_position = position
             if position is None:
                 jpg_position = self.segments[indx]['cust_duration'] / 2
                 if jpg_position >= 60:
