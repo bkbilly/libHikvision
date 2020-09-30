@@ -112,10 +112,21 @@ class libHikvision():
         return self.files
 
     def getSegments(self, from_time=None, to_time=None, from_unixtime=None, to_unixtime=None):
-        """
-            Parses index file for information about each recording by providing the exact path with the segment to extract.
-            Can filter to resolve recordings only from the provided datetimes.
-            Datetimes can be either unixtime or datetime.
+        """Parses index file for information about each recording by providing the exact path with the segment to extract.
+
+        --== Parameters ==--
+        Filters events based on the provided time provided in one of the following ways:
+            Datetime: from_time & to_time eg. `datetime(2019, 8, 21, 22, 23, 30)`
+            UnixTime: from_unixtime & to_unixtime eg. `1566415410`
+
+        All the arguments default to None which means that it will return everythin.
+        If only `from_*` is defined, then it will return from the provided time till now.
+        If only `to_*` is defined, then it will return from the beginning till the provided time.
+        If both are defined, then it will return all events withing this time period.
+
+        --== Returns ==--
+        Returns a list of dictionaries with each event. The most important is the index of this
+        dictionary which can be used to extract the video or image.
         """
         self.getNASInfo()
         self.getFileHeader()
@@ -187,8 +198,23 @@ class libHikvision():
         self.segments.sort(key=lambda item:item['cust_startTime'], reverse=False)
         return self.segments
 
-    def extractSegmentMP4(self, indx, cachePath='/var/tmp', filename=None, resolution=None, debug=False):
-        """Extracts the segment to an MP4 file in the provided directory"""
+    def extractSegmentMP4(self, indx, cachePath='/var/tmp', filename=None, resolution=None, debug=False, replace=True):
+        """Extracts the segment to an MP4 file in the provided directory
+
+        --== Parameters ==--
+        indx:       The index that corresponds to the getSegments command.
+        cachePath:  Folder to save temporary files for the conversion. The default is `/var/tmp`.
+        filename:   Defines the path with the name for the output file.
+                    If `None` then saves it to the cachePath directory with a default name.
+        resolution: Changes to specific resolution. It should be in the format `Width x Height` eg. `480x270`.
+                    If `None` then it mentains the orignal resolution which is preferable because it is faster.
+        debug:      Shows the output of the shell command.
+        replace:    If True then removes the file with the same name if it exists and creates it.
+                    If False it checks if the file exists and doesn't let it create it again.
+
+        --== Returns ==--
+        Returns the output file path.
+        """
         filePath = self.segments[indx]['cust_filePath']
         startOffset = self.segments[indx]['startOffset']
         endOffset = self.segments[indx]['endOffset']
@@ -197,7 +223,10 @@ class libHikvision():
             mp4_file = '{0}/hik_datadir{1[cust_indexFileNum]}_{1[startOffset]}_{1[endOffset]}.mp4'.format(cachePath, self.segments[indx])
         else:
             mp4_file = filename
-        if not os.path.exists(mp4_file):
+
+        if os.path.exists(mp4_file) and replace:
+            os.remove(mp4_file)
+        if not os.path.exists(mp4_file) or replace:
             # Extracts the segment to a temporary h264 file
             #print('{0[cust_filePath]:55} {0[cust_duration]:5} {0[startOffset]:10} {0[endOffset]:10}   {0[cust_startTime]} - {0[cust_endTime]}'.format(
             #    self.segments[indx]
@@ -219,8 +248,26 @@ class libHikvision():
             os.remove(h264_file)
         return mp4_file
 
-    def extractSegmentJPG(self, indx, cachePath='/var/tmp', filename=None, resolution='480x270', position=None, debug=False):
-        """Extracts an thumbnail to the provided directory"""
+    def extractSegmentJPG(self, indx, cachePath='/var/tmp', filename=None, resolution=None, debug=False, replace=True, position=None):
+        """Extracts an thumbnail to the provided directory
+
+        --== Parameters ==--
+        indx:       The index that corresponds to the getSegments command.
+        cachePath:  Folder to save temporary files for the conversion. The default is `/var/tmp`.
+        filename:   Defines the path with the name for the output file.
+                    If `None` then saves it to the cachePath directory with a default name.
+        resolution: Changes to specific resolution. It should be in the format `Width x Height` eg. `480x270`.
+                    If `None` then it mentains the orignal resolution which is preferable because it is faster.
+        debug:      Shows the output of the shell command.
+        replace:    If True then removes the file with the same name if it exists and creates it.
+                    If False it checks if the file exists and doesn't let it create it again.
+        position:   It should be an integer which correspond to seconds from the start of the video on which
+                    an image is extracted. If `None` then it finds it automatically arround the middle and not
+                    beyond 1 minute.
+
+        --== Returns ==--
+        Returns the output file path.
+        """
         filePath = self.segments[indx]['cust_filePath']
         startOffset = self.segments[indx]['startOffset']
         endOffset = self.segments[indx]['endOffset']
@@ -229,6 +276,9 @@ class libHikvision():
             jpg_file = '{0}/hik_datadir{1[cust_indexFileNum]}_{1[startOffset]}_{1[endOffset]}.jpg'.format(cachePath, self.segments[indx])
         else:
             jpg_file = filename
+
+        if os.path.exists(jpg_file) and replace:
+            os.remove(jpg_file)
         if not os.path.exists(jpg_file):
             #print('{0[cust_filePath]:55} {0[cust_duration]:5} {0[startOffset]:10} {0[endOffset]:10}   {0[cust_startTime]} - {0[cust_endTime]}'.format(
             #    self.segments[indx]
@@ -244,7 +294,11 @@ class libHikvision():
                 jpg_position = self.segments[indx]['cust_duration'] / 2
                 if jpg_position >= 60:
                     jpg_position = 59
-            cmd = 'ffmpeg -ss 00:00:{2} -i {0} -hide_banner -vframes 1 -s {3} {1}'.format(h264_file, jpg_file, jpg_position, resolution)
+            if resolution is None:
+                cmd = 'ffmpeg -ss 00:00:{2} -i {0} -hide_banner -vframes 1 {1}'.format(h264_file, jpg_file, jpg_position)
+            else:
+                cmd = 'ffmpeg -ss 00:00:{2} -i {0} -hide_banner -vframes 1 -s {3} {1}'.format(h264_file, jpg_file, jpg_position, resolution)
+
             if debug:
                 subprocess.call(cmd, shell=True)
             else:

@@ -41,6 +41,8 @@ for num, segment in enumerate(segments, start=0):
     print(hik.extractSegmentJPG(num, cachePath='/var/tmp/', filename='/var/tmp/video{0}.jpg'.format(num)))
 ```
 
+You should also check the documentation of each method for extra options.
+
 ### Credits
 
 Based on Dave Hope's PHP code available at https://github.com/davehope/libHikvision
