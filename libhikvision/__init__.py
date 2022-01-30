@@ -18,25 +18,38 @@ class libHikvision():
         """Inputs a cameradir where the datadirs and the info.bin exist.
            Can choose between a video or image."""
         self.cameradir = cameradir
-        if asktype in ['video', 'mp4']:
-            self.indexFile = 'index00.bin'
-        elif asktype in ['image', 'img', 'pic']:
-            self.indexFile = 'index00p.bin'
+        self.asktype = asktype
 
-        self.nasinfo_len = 68
         self.header_len = 1280
         self.file_len = 32
         self.segment_len = 80
         self.maxSegments = 256
         self.video_len = 4096
 
-        self.info = {}
-        self.header = {}
-        self.files = []
+        self.indexType = None
         self.segments = []
+        self.get_index_path()
+        self.info = self.getNASInfo()
+        self.header = self.getFileHeader()
+
+    def get_index_path(self, indexFileNum=0):
+        self.indexType = 'bin'
+        if self.asktype in ['video', 'mp4']:
+            self.indexFile = 'index00.bin'
+        elif self.asktype in ['image', 'img', 'pic']:
+            self.indexFile = 'index00p.bin'
+        filename = f"{self.cameradir}/datadir{indexFileNum}/{self.indexFile}"
+        if not os.path.exists(filename):
+            self.indexType = 'sqlite'
+            self.indexFile = 'record_db_index00'
+        filename = f"{self.cameradir}/datadir{indexFileNum}/{self.indexFile}"
+        if not os.path.exists(filename):
+            raise Exception("Can't find indexes...")
+        return filename
 
     def getNASInfo(self):
         """Parses the info.bin file for some basic information."""
+        nasinfo_len = 68
         info_keys = [
             'serialNumber',
             'MACAddr',
@@ -45,21 +58,13 @@ class libHikvision():
             'f_blocks',
             'DataDirs',
         ]
-        fileName = self.cameradir + 'info.bin'
+        fileName = f"{self.cameradir}/info.bin"
         unpackformat = "48s 4s B 3I".replace(' ', '')
         with open(fileName, mode='rb') as file:
-            byte = file.read(self.nasinfo_len)
-            self.info = dict(zip(info_keys, unpack(
+            byte = file.read(nasinfo_len)
+            info = dict(zip(info_keys, unpack(
                 unpackformat, byte)))
-        self.checkPaths()
-        return self.info
-
-    def checkPaths(self):
-        """Checks if the files exist and shows an error"""
-        for indexFileNum in range(self.info['DataDirs']):
-            fileName = self.cameradir + 'datadir%s/%s' % (indexFileNum, self.indexFile)
-            if not os.path.exists(fileName):
-                print('Path not found: ' + fileName)
+        return info
 
     def getFileHeader(self):
         """Parses the index file of each datadir for some basic information"""
@@ -73,49 +78,18 @@ class libHikvision():
             'unknown',
             'checksum',
         ]
-        self.segments = []
         for indexFileNum in range(self.info['DataDirs']):
-            fileName = self.cameradir + 'datadir%s/%s' % (indexFileNum, self.indexFile)
+            fileName = self.get_index_path(indexFileNum)
             unpackformat = "Q 4I 1176s 76s I".replace(' ', '')
             with open(fileName, mode='rb') as file:
                 byte = file.read(self.header_len)
-                self.header = dict(zip(header_keys, unpack(
+                header = dict(zip(header_keys, unpack(
                     unpackformat, byte)))
-        return self.header
-
-    def getFiles(self):
-        """Parses the index file for each datadir for information about each recorded file"""
-        self.getNASInfo()
-        self.getFileHeader()
-
-        files_keys = [
-            'fileNo',
-            'chan',
-            'segRecNums',
-            'startTime',
-            'endTime',
-            'status',
-            'unknownA',
-            'lockedSegNum',
-            'unknownB',
-            'infoTypes',
-        ]
-        for indexFileNum in range(self.info['DataDirs']):
-            fileName = self.cameradir + 'datadir%s/%s' % (indexFileNum, self.indexFile)
-            unpackformat = "I 2H 2I s s H 4s 8s".replace(' ', '')
-            offset = self.header_len
-            with open(fileName, mode='rb') as file:
-                byte = file.read(offset)
-                for i in range(self.header['avFiles']):
-                    byte = file.read(self.file_len)
-                    myfile = dict(zip(files_keys, unpack(
-                        unpackformat, byte)))
-                    if myfile['chan'] != 65535:
-                        self.files.append(myfile)
-        return self.files
+        return header
 
     def getSegments(self, from_time=None, to_time=None, from_unixtime=None, to_unixtime=None):
-        """Parses index file for information about each recording by providing the exact path with the segment to extract.
+        """Parses index file for information about each recording by 
+           providing the exact path with the segment to extract.
 
         --== Parameters ==--
         Filters events based on the provided time provided in one of the following ways:
@@ -131,13 +105,57 @@ class libHikvision():
         Returns a list of dictionaries with each event. The most important is the index of this
         dictionary which can be used to extract the video or image.
         """
-        self.getNASInfo()
-        self.getFileHeader()
-
         if from_unixtime is not None:
             from_time = datetime.fromtimestamp(from_unixtime)
         if to_unixtime is not None:
             to_time = datetime.fromtimestamp(to_unixtime)
+        if from_time is not None:
+            from_unixtime = int(datetime.timestamp(from_time))
+        if to_time is not None:
+            to_unixtime = int(datetime.timestamp(to_time))
+
+        if self.indexType == 'bin':
+            self.getSegmentsBIN(from_time, to_time)
+        elif self.indexType == 'sqlite':
+            self.getSegmentsSQL(from_unixtime, to_unixtime)
+        return self.segments
+
+    def getSegmentsSQL(self, from_unixtime=None, to_unixtime=None):
+        limit_statement = ""
+        if from_unixtime is not None:
+            limit_statement += f" AND start_time_tv_sec >= {from_unixtime}"
+        if to_unixtime is not None:
+            limit_statement += f" AND start_time_tv_sec <= {to_unixtime}"
+        self.segments = []
+        statement = f'''SELECT
+                file_no as "cust_fileNum",
+                start_offset as "startOffset",
+                end_offset as "endOffset",
+                start_time_tv_sec as "startTime",
+                end_time_tv_sec as "endTime"
+            FROM record_segment_idx_tb
+            WHERE record_type != 0 {limit_statement}
+            ORDER BY start_time_tv_sec;'''
+
+        for indexFileNum in range(self.info['DataDirs']):
+            fileName = self.get_index_path(indexFileNum)
+            con = sqlite3.connect(fileName)
+            cur = con.cursor()
+            for fileNum, startOffset, endOffset, startTime, endTime in cur.execute(statement):
+                segment = {}
+                segment['startOffset'] = startOffset
+                segment['endOffset'] = endOffset
+                segment['cust_indexFileNum'] = indexFileNum
+                segment['cust_startTime'] = datetime.utcfromtimestamp(startTime)
+                segment['cust_endTime'] = datetime.utcfromtimestamp(endTime)
+                segment['duration'] = endTime - startTime
+                segment['cust_duration'] = endTime - startTime
+                self.segments.append(segment)
+        return self.segments
+
+    def getSegmentsBIN(self, from_time=None, to_time=None):
+        self.segments = []
+
         mask = 0x00000000ffffffff
         segment_keys = [
             'type',
@@ -160,7 +178,7 @@ class libHikvision():
             'infoEndOffset',
         ]
         for indexFileNum in range(self.info['DataDirs']):
-            fileName = self.cameradir + 'datadir%s/%s' % (indexFileNum, self.indexFile)
+            fileName = self.get_index_path(indexFileNum)
             unpackformat = "s s 2s 4s 3Q 4I 4s 4s 8s 4s 4s 4s 4s".replace(' ', '')
             offset = self.header_len + self.header['avFiles'] * self.file_len
             with open(fileName, mode='rb') as file:
@@ -197,7 +215,7 @@ class libHikvision():
                                     self.segments.append(segment)
 
         # Sort by start time
-        self.segments.sort(key=lambda item:item['cust_startTime'], reverse=False)
+        self.segments.sort(key=lambda item: item['cust_startTime'], reverse=False)
         return self.segments
 
     def extractSegmentMP4(self, indx, cachePath='/var/tmp', filename=None, resolution=None, debug=False, replace=True):
@@ -307,6 +325,3 @@ class libHikvision():
                 subprocess.call(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             os.remove(h264_file)
         return jpg_file
-
-
-

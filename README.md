@@ -17,10 +17,6 @@ from datetime import datetime
 cameradir = '/var/tmp/hikvision/'
 hik = libHikvision(cameradir, 'video')
 
-# Gets information about the structure of the files
-for file in hik.getFiles():
-    print(file)
-
 # Get information about the server
 print hik.getNASInfo()
 
