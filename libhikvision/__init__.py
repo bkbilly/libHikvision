@@ -1,7 +1,6 @@
 #!/usr/bin/python3
 
 """ Import library like this: from libhikvision import libHikvision """
-name = "libhikvision"
 
 from struct import unpack
 from datetime import datetime
@@ -10,6 +9,7 @@ import os
 import subprocess
 import sqlite3
 
+name = "libhikvision"
 
 class libHikvision():
     """This library parses the Hikvision bin files and is able to extract the required media"""
@@ -258,9 +258,9 @@ class libHikvision():
 
             # Convert the h264 file to mp4
             if resolution is None:
-                cmd = 'ffmpeg -i {0} -threads auto -c:v copy -c:a none {1} -hide_banner'.format(h264_file, mp4_file)
+                cmd = 'ffmpeg -i {0} -threads auto -c:v copy -an {1} -hide_banner'.format(h264_file, mp4_file)
             else:
-                cmd = 'avconv -i {0} -threads auto -s {2} -c:a none {1}'.format(h264_file, mp4_file, resolution)
+                cmd = 'avconv -i {0} -threads auto -s {2} -an {1}'.format(h264_file, mp4_file, resolution)
             if debug:
                 subprocess.call(cmd, shell=True)
             else:
