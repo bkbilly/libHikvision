@@ -127,6 +127,12 @@ def main(args=None):
         help="Resolution for extracted video/image (e.g. '1280x720')"
     )
     parser.add_argument(
+        "--num-files",
+        type=int,
+        default=None,
+        help="Override number of chunk files in circular buffer (e.g. 4 or 35 for HIKBTREE)"
+    )
+    parser.add_argument(
         "--debug",
         action="store_true",
         help="Enable ffmpeg debugging output"
@@ -146,7 +152,7 @@ def main(args=None):
         sys.exit(1)
 
     try:
-        hik = libHikvision(parsed.target, parsed.type)
+        hik = libHikvision(parsed.target, parsed.type, num_files=parsed.num_files)
     except Exception as e:
         print(f"Error initializing libHikvision: {e}", file=sys.stderr)
         sys.exit(1)
@@ -258,8 +264,9 @@ def main(args=None):
             print(f"Found {len(segments)} segment(s) [Format: {hik.indexType}]:")
             for num, segment in enumerate(segments):
                 ch_info = f"Ch {segment['channel']:2d} | " if 'channel' in segment else ""
+                chunk_info = f" (Chunk #{segment['raw_file_idx']})" if 'raw_file_idx' in segment and segment.get('raw_file_idx') != segment.get('cust_fileNum') else ""
                 dur_str = f"{segment['cust_duration']:6.1f}s" if isinstance(segment['cust_duration'], float) else f"{segment['cust_duration']:5d}s"
-                print(f"[{num:4d}] {ch_info}{segment['cust_filePath']} | {segment['cust_startTime']} -> {segment['cust_endTime']} ({dur_str})")
+                print(f"[{num:4d}] {ch_info}{segment['cust_filePath']}{chunk_info} | {segment['cust_startTime']} -> {segment['cust_endTime']} ({dur_str})")
     except BrokenPipeError:
         try:
             sys.stdout.close()

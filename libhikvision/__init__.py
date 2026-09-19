@@ -14,7 +14,7 @@ name = "libhikvision"
 class libHikvision():
     """This library parses the Hikvision bin files and is able to extract the required media"""
 
-    def __init__(self, cameradir, asktype='video'):
+    def __init__(self, cameradir, asktype='video', num_files=None):
         """Inputs a cameradir where the datadirs and the info.bin exist,
            or an explicit path to an index file (.bin / record_db_index00).
            Can choose between a video or image."""
@@ -27,6 +27,7 @@ class libHikvision():
             self.cameradir = cameradir
             self.indexFile = None
         self.asktype = asktype
+        self.num_files = num_files
 
         self.header_len = 1280
         self.file_len = 32
@@ -406,7 +407,10 @@ class libHikvision():
                 f for f in os.listdir(search_dir)
                 if f.startswith('hiv') and f.endswith(f'.{fileExtension}')
             ])
-            num_files = len(hiv_files) if len(hiv_files) > 0 else 1
+            if getattr(self, 'num_files', None) is not None and self.num_files > 0:
+                num_files = self.num_files
+            else:
+                num_files = len(hiv_files)
 
             with open(fileName, mode='rb') as file:
                 data = file.read()
@@ -444,7 +448,7 @@ class libHikvision():
 
                     disk_offset = unpack('<Q', rec[32:40])[0]
                     raw_file_idx = (disk_offset - base_offset) // file_size
-                    file_num = raw_file_idx % num_files if num_files > 0 else raw_file_idx
+                    file_num = (raw_file_idx % num_files) if num_files > 0 else raw_file_idx
 
                     file_path = os.path.join(search_dir, f'hiv{file_num:05d}.{fileExtension}')
 
@@ -463,6 +467,7 @@ class libHikvision():
                         'startOffset': 0,
                         'endOffset': file_size,
                         'diskOffset': disk_offset,
+                        'raw_file_idx': raw_file_idx,
                     }
 
                     if from_time is None and to_time is None:
@@ -489,7 +494,7 @@ class libHikvision():
         filename:   Defines the path with the name for the output file.
                     If `None` then saves it to the cachePath directory with a default name.
         resolution: Changes to specific resolution. It should be in the format `Width x Height` eg. `480x270`.
-                    If `None` then it mentains the orignal resolution which is preferable because it is faster.
+                    If `None` then it maintains the original resolution which is preferable because it is faster.
         debug:      Shows the output of the shell command.
         replace:    If True then removes the file with the same name if it exists and creates it.
                     If False it checks if the file exists and doesn't let it create it again.
@@ -500,7 +505,6 @@ class libHikvision():
         filePath = self.segments[indx]['cust_filePath']
         startOffset = self.segments[indx]['startOffset']
         endOffset = self.segments[indx]['endOffset']
-        h264_file = '{0}/hik_datadir{1[cust_indexFileNum]}_{1[startOffset]}_{1[endOffset]}.h264'.format(cachePath, self.segments[indx])
         if filename is None:
             mp4_file = '{0}/hik_datadir{1[cust_indexFileNum]}_{1[startOffset]}_{1[endOffset]}.mp4'.format(cachePath, self.segments[indx])
         else:
@@ -509,29 +513,109 @@ class libHikvision():
         if os.path.exists(mp4_file) and replace:
             os.remove(mp4_file)
         if not os.path.exists(mp4_file) or replace:
-            with open(filePath, mode='rb') as video_in, open(h264_file, mode='wb') as video_out:
+            if not os.path.exists(filePath):
+                raise FileNotFoundError(f"Video chunk file not found: {filePath}")
+
+            length = endOffset - startOffset
+            chunk_size = 64 * 1024
+
+            if resolution is None:
+                cmd = [
+                    'ffmpeg', '-y',
+                    '-fflags', '+genpts',
+                    '-i', 'pipe:0',
+                    '-threads', 'auto',
+                    '-c:v', 'copy',
+                    '-an',
+                    '-avoid_negative_ts', 'make_zero',
+                    '-movflags', '+faststart',
+                    mp4_file
+                ]
+            else:
+                cmd = [
+                    'ffmpeg', '-y',
+                    '-fflags', '+genpts',
+                    '-i', 'pipe:0',
+                    '-threads', 'auto',
+                    '-s', resolution,
+                    '-c:v', 'libx264',
+                    '-preset', 'veryfast',
+                    '-crf', '23',
+                    '-an',
+                    '-avoid_negative_ts', 'make_zero',
+                    '-movflags', '+faststart',
+                    mp4_file
+                ]
+
+            proc = subprocess.Popen(
+                cmd,
+                stdin=subprocess.PIPE,
+                stdout=None if debug else subprocess.PIPE,
+                stderr=None if debug else subprocess.PIPE
+            )
+            with open(filePath, mode='rb') as video_in:
                 video_in.seek(startOffset)
-                while video_in.tell() < endOffset:
-                    chunk_size = min(self.video_len, endOffset - video_in.tell())
-                    chunk = video_in.read(chunk_size)
+                remaining = length
+                while remaining > 0:
+                    to_read = min(chunk_size, remaining)
+                    chunk = video_in.read(to_read)
                     if not chunk:
                         break
-                    video_out.write(chunk)
+                    try:
+                        proc.stdin.write(chunk)
+                    except BrokenPipeError:
+                        break
+                    remaining -= len(chunk)
+            try:
+                proc.stdin.close()
+            except Exception:
+                pass
+            proc.wait()
 
-            # Convert the h264 file to mp4
-            if resolution is None:
-                cmd = 'ffmpeg -i {0} -threads auto -c:v copy -an {1} -hide_banner'.format(h264_file, mp4_file)
-            else:
-                cmd = 'avconv -i {0} -threads auto -s {2} -an {1}'.format(h264_file, mp4_file, resolution)
-            if debug:
-                subprocess.call(cmd, shell=True)
-            else:
-                subprocess.call(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            os.remove(h264_file)
+            # If fast copy failed, fallback to transcode
+            if proc.returncode != 0 and resolution is None:
+                fallback_cmd = [
+                    'ffmpeg', '-y',
+                    '-fflags', '+genpts',
+                    '-i', 'pipe:0',
+                    '-threads', 'auto',
+                    '-c:v', 'libx264',
+                    '-preset', 'veryfast',
+                    '-crf', '23',
+                    '-an',
+                    '-avoid_negative_ts', 'make_zero',
+                    '-movflags', '+faststart',
+                    mp4_file
+                ]
+                proc2 = subprocess.Popen(
+                    fallback_cmd,
+                    stdin=subprocess.PIPE,
+                    stdout=None if debug else subprocess.PIPE,
+                    stderr=None if debug else subprocess.PIPE
+                )
+                with open(filePath, mode='rb') as video_in:
+                    video_in.seek(startOffset)
+                    remaining = length
+                    while remaining > 0:
+                        to_read = min(chunk_size, remaining)
+                        chunk = video_in.read(to_read)
+                        if not chunk:
+                            break
+                        try:
+                            proc2.stdin.write(chunk)
+                        except BrokenPipeError:
+                            break
+                        remaining -= len(chunk)
+                try:
+                    proc2.stdin.close()
+                except Exception:
+                    pass
+                proc2.wait()
+
         return mp4_file
 
     def extractSegmentJPG(self, indx, cachePath='/var/tmp', filename=None, resolution=None, debug=False, replace=True, position=None):
-        """Extracts an thumbnail to the provided directory
+        """Extracts a thumbnail to the provided directory
 
         --== Parameters ==--
         indx:       The index that corresponds to the getSegments command.
@@ -539,12 +623,12 @@ class libHikvision():
         filename:   Defines the path with the name for the output file.
                     If `None` then saves it to the cachePath directory with a default name.
         resolution: Changes to specific resolution. It should be in the format `Width x Height` eg. `480x270`.
-                    If `None` then it mentains the orignal resolution which is preferable because it is faster.
+                    If `None` then it maintains the original resolution which is preferable because it is faster.
         debug:      Shows the output of the shell command.
         replace:    If True then removes the file with the same name if it exists and creates it.
                     If False it checks if the file exists and doesn't let it create it again.
-        position:   It should be an integer which correspond to seconds from the start of the video on which
-                    an image is extracted. If `None` then it finds it automatically arround the middle and not
+        position:   It should be an integer which corresponds to seconds from the start of the video on which
+                    an image is extracted. If `None` then it finds it automatically around the middle and not
                     beyond 1 minute.
 
         --== Returns ==--
@@ -553,7 +637,7 @@ class libHikvision():
         filePath = self.segments[indx]['cust_filePath']
         startOffset = self.segments[indx]['startOffset']
         endOffset = self.segments[indx]['endOffset']
-        h264_file = '{0}/hik_datadir{1[cust_indexFileNum]}_{1[startOffset]}_{1[endOffset]}.h264'.format(cachePath, self.segments[indx])
+        temp_dat = f"{cachePath}/hik_thumb_{self.segments[indx]['cust_indexFileNum']}_{startOffset}_{endOffset}.dat"
         if filename is None:
             jpg_file = '{0}/hik_datadir{1[cust_indexFileNum]}_{1[startOffset]}_{1[endOffset]}.jpg'.format(cachePath, self.segments[indx])
         else:
@@ -587,29 +671,39 @@ class libHikvision():
                         os.replace(tmp_scaled, jpg_file)
                 return jpg_file
 
-            with open(filePath, mode='rb') as video_in, open(h264_file, mode='wb') as video_out:
-                video_in.seek(startOffset)
-                while video_in.tell() < endOffset:
-                    chunk_size = min(self.video_len, endOffset - video_in.tell())
-                    chunk = video_in.read(chunk_size)
-                    if not chunk:
-                        break
-                    video_out.write(chunk)
+            if not os.path.exists(filePath):
+                raise FileNotFoundError(f"Video chunk file not found: {filePath}")
 
-            # Create JPG
+            # Read up to 15MB (enough for finding an I-frame within the first minute)
+            with open(filePath, mode='rb') as video_in, open(temp_dat, mode='wb') as raw_out:
+                video_in.seek(startOffset)
+                max_thumb_bytes = min(endOffset - startOffset, 15 * 1024 * 1024)
+                raw_out.write(video_in.read(max_thumb_bytes))
+
+            # Determine thumbnail position
             jpg_position = position
             if position is None:
                 jpg_position = self.segments[indx]['cust_duration'] / 2
                 if jpg_position >= 60:
                     jpg_position = 59
-            if resolution is None:
-                cmd = 'ffmpeg -ss 00:00:{2} -i {0} -hide_banner -vframes 1 {1}'.format(h264_file, jpg_file, int(jpg_position))
-            else:
-                cmd = 'ffmpeg -ss 00:00:{2} -i {0} -hide_banner -vframes 1 -s {3} {1}'.format(h264_file, jpg_file, int(jpg_position), resolution)
+                if jpg_position < 1:
+                    jpg_position = 0
 
+            res_opt = f"-s {resolution}" if resolution is not None else ""
+            cmd = f'ffmpeg -y -fflags +genpts -ss {int(jpg_position)} -i "{temp_dat}" -hide_banner -vframes 1 {res_opt} -q:v 2 "{jpg_file}"'
             if debug:
                 subprocess.call(cmd, shell=True)
             else:
                 subprocess.call(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            os.remove(h264_file)
+
+            # If position seek didn't produce a frame (e.g. short/corrupt clip), fallback to first frame
+            if not os.path.exists(jpg_file) or os.path.getsize(jpg_file) == 0:
+                cmd_fallback = f'ffmpeg -y -fflags +genpts -i "{temp_dat}" -hide_banner -vframes 1 {res_opt} -q:v 2 "{jpg_file}"'
+                if debug:
+                    subprocess.call(cmd_fallback, shell=True)
+                else:
+                    subprocess.call(cmd_fallback, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+            if os.path.exists(temp_dat):
+                os.remove(temp_dat)
         return jpg_file
