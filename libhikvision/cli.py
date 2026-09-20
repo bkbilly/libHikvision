@@ -211,6 +211,8 @@ def main(args=None):
                 print(f"No valid segments matching index '{parsed.extract_mp4}'. Total segments found: {len(segments)}")
             for idx in indices:
                 seg = segments[idx]
+                if seg.get('overwritten'):
+                    print(f"Warning: Segment #{idx} ({seg['cust_startTime']}) was overwritten on disk by newer recordings (Chunk #{seg.get('raw_file_idx')} is older than active retention window). Extracted video will likely be incomplete or empty.", file=sys.stderr)
                 dt_str = seg['cust_startTime'].strftime('%Y%m%d_%H%M%S')
                 ch_str = f"_ch{seg['channel']}" if 'channel' in seg else ""
                 out_file = os.path.join(parsed.output_dir, f"video_{dt_str}{ch_str}_seg{idx:04d}.mp4")
@@ -231,6 +233,8 @@ def main(args=None):
                 print(f"No valid segments matching index '{parsed.extract_jpg}'. Total segments found: {len(segments)}")
             for idx in indices:
                 seg = segments[idx]
+                if seg.get('overwritten'):
+                    print(f"Warning: Segment #{idx} ({seg['cust_startTime']}) was overwritten on disk by newer recordings (Chunk #{seg.get('raw_file_idx')} is older than active retention window).", file=sys.stderr)
                 dt_str = seg['cust_startTime'].strftime('%Y%m%d_%H%M%S')
                 ch_str = f"_ch{seg['channel']}" if 'channel' in seg else ""
                 out_file = os.path.join(parsed.output_dir, f"thumb_{dt_str}{ch_str}_seg{idx:04d}.jpg")
@@ -265,8 +269,9 @@ def main(args=None):
             for num, segment in enumerate(segments):
                 ch_info = f"Ch {segment['channel']:2d} | " if 'channel' in segment else ""
                 chunk_info = f" (Chunk #{segment['raw_file_idx']})" if 'raw_file_idx' in segment and segment.get('raw_file_idx') != segment.get('cust_fileNum') else ""
+                overwritten_tag = " [OVERWRITTEN]" if segment.get('overwritten') else ""
                 dur_str = f"{segment['cust_duration']:6.1f}s" if isinstance(segment['cust_duration'], float) else f"{segment['cust_duration']:5d}s"
-                print(f"[{num:4d}] {ch_info}{segment['cust_filePath']}{chunk_info} | {segment['cust_startTime']} -> {segment['cust_endTime']} ({dur_str})")
+                print(f"[{num:4d}] {ch_info}{segment['cust_filePath']}{chunk_info} | {segment['cust_startTime']} -> {segment['cust_endTime']} ({dur_str}){overwritten_tag}")
     except BrokenPipeError:
         try:
             sys.stdout.close()

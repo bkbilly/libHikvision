@@ -409,8 +409,31 @@ class libHikvision():
             ])
             if getattr(self, 'num_files', None) is not None and self.num_files > 0:
                 num_files = self.num_files
+            elif len(hiv_files) > 0:
+                # Check modification times to see if only a subset of preallocated files is actively used
+                file_mtimes = []
+                for f in hiv_files:
+                    try:
+                        file_mtimes.append(os.path.getmtime(os.path.join(search_dir, f)))
+                    except Exception:
+                        pass
+                if file_mtimes:
+                    newest_m = max(file_mtimes)
+                    oldest_m = min(file_mtimes)
+                    # If files differ by more than 24h, check for active pool subset
+                    if newest_m - oldest_m > 86400:
+                        recent_count = sum(1 for m in file_mtimes if newest_m - m < 7 * 86400)
+                        if 0 < recent_count < len(hiv_files):
+                            num_files = recent_count
+                        else:
+                            num_files = len(hiv_files)
+                    else:
+                        num_files = len(hiv_files)
+                else:
+                    num_files = len(hiv_files)
             else:
-                num_files = len(hiv_files)
+                num_files = 0
+            self.detected_num_files = num_files
 
             with open(fileName, mode='rb') as file:
                 data = file.read()
@@ -468,6 +491,7 @@ class libHikvision():
                         'endOffset': file_size,
                         'diskOffset': disk_offset,
                         'raw_file_idx': raw_file_idx,
+                        'overwritten': False,
                     }
 
                     if from_time is None and to_time is None:
@@ -481,6 +505,17 @@ class libHikvision():
                     elif from_time is not None and to_time is not None:
                         if segment['cust_startTime'] >= from_time and segment['cust_startTime'] <= to_time:
                             self.segments.append(segment)
+
+        # Flag segments that have been overwritten in the circular buffer
+        if self.segments:
+            max_chunk = max(s.get('raw_file_idx', 0) for s in self.segments)
+            self.max_chunk = max_chunk
+            active_window = getattr(self, 'detected_num_files', 0) or getattr(self, 'num_files', 0) or 0
+            if active_window > 0 and max_chunk >= active_window:
+                min_active_chunk = max_chunk - active_window + 1
+                for s in self.segments:
+                    if s.get('raw_file_idx', 0) < min_active_chunk:
+                        s['overwritten'] = True
 
         self.segments.sort(key=lambda item: item['cust_startTime'], reverse=False)
         return self.segments
