@@ -409,30 +409,14 @@ class libHikvision():
             ])
             if getattr(self, 'num_files', None) is not None and self.num_files > 0:
                 num_files = self.num_files
-            elif len(hiv_files) > 0:
-                # Check modification times to see if only a subset of preallocated files is actively used
-                file_mtimes = []
-                for f in hiv_files:
-                    try:
-                        file_mtimes.append(os.path.getmtime(os.path.join(search_dir, f)))
-                    except Exception:
-                        pass
-                if file_mtimes:
-                    newest_m = max(file_mtimes)
-                    oldest_m = min(file_mtimes)
-                    # If files differ by more than 24h, check for active pool subset
-                    if newest_m - oldest_m > 86400:
-                        recent_count = sum(1 for m in file_mtimes if newest_m - m < 7 * 86400)
-                        if 0 < recent_count < len(hiv_files):
-                            num_files = recent_count
-                        else:
-                            num_files = len(hiv_files)
-                    else:
-                        num_files = len(hiv_files)
-                else:
-                    num_files = len(hiv_files)
             else:
-                num_files = 0
+                total_disk_files = 0
+                if hasattr(self, 'info') and isinstance(self.info, dict):
+                    bsize = self.info.get('f_bsize', 0)
+                    blocks = self.info.get('f_blocks', 0)
+                    if bsize > 0 and blocks > 0:
+                        total_disk_files = (bsize * blocks) // file_size
+                num_files = max(len(hiv_files), total_disk_files)
             self.detected_num_files = num_files
 
             with open(fileName, mode='rb') as file:
@@ -471,9 +455,20 @@ class libHikvision():
 
                     disk_offset = unpack('<Q', rec[32:40])[0]
                     raw_file_idx = (disk_offset - base_offset) // file_size
-                    file_num = (raw_file_idx % num_files) if num_files > 0 else raw_file_idx
+                    direct_file_path = os.path.join(search_dir, f'hiv{raw_file_idx:05d}.{fileExtension}')
 
-                    file_path = os.path.join(search_dir, f'hiv{file_num:05d}.{fileExtension}')
+                    if getattr(self, 'num_files', None) is not None and self.num_files > 0:
+                        file_num = raw_file_idx % self.num_files
+                        file_path = os.path.join(search_dir, f'hiv{file_num:05d}.{fileExtension}')
+                    elif os.path.exists(direct_file_path):
+                        file_num = raw_file_idx
+                        file_path = direct_file_path
+                    elif num_files > 0:
+                        file_num = raw_file_idx % num_files
+                        file_path = os.path.join(search_dir, f'hiv{file_num:05d}.{fileExtension}')
+                    else:
+                        file_num = raw_file_idx
+                        file_path = direct_file_path
 
                     segment = {
                         'channel': ch,
