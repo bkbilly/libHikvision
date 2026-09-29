@@ -1,11 +1,15 @@
+import re
 import setuptools
 
 with open("README.md", "r") as fh:
     long_description = fh.read()
 
+with open("libhikvision/__init__.py", "r") as fh:
+    version = re.search(r"^__version__\s*=\s*['\"]([^'\"]*)['\"]", fh.read(), re.MULTILINE).group(1)
+
 setuptools.setup(
     name='libhikvision',
-    version='0.4.1',
+    version=version,
     author="bkbilly",
     author_email="bkbilly@hotmail.com",
     description="Parse Hikvision datadirs that Hikvision IP cameras store the videos",

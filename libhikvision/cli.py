@@ -7,7 +7,7 @@ import json
 import os
 import sys
 from datetime import datetime
-from libhikvision import libHikvision
+from libhikvision import libHikvision, __version__
 
 
 def parse_time_arg(val):
@@ -54,6 +54,11 @@ def main(args=None):
     parser = argparse.ArgumentParser(
         prog="libhikvision",
         description="CLI tool to parse Hikvision IP Camera and DVR storage archives and extract video/thumbnails."
+    )
+    parser.add_argument(
+        "-v", "--version",
+        action="version",
+        version=f"%(prog)s {__version__}"
     )
     parser.add_argument(
         "target",

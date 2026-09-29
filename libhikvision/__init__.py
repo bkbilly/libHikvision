@@ -10,6 +10,7 @@ import subprocess
 import sqlite3
 
 name = "libhikvision"
+__version__ = "0.4.2"
 
 class libHikvision():
     """This library parses the Hikvision bin files and is able to extract the required media"""
@@ -101,8 +102,20 @@ class libHikvision():
     def getNASInfo(self):
         """Parses the info.bin file for some basic information."""
         nasinfo_len = 68
-        fileName = f"{self.cameradir}/info.bin"
-        if not os.path.exists(fileName):
+        candidate_paths = [
+            f"{self.cameradir}/info.bin",
+            f"{self.cameradir}/datadir0/info.bin",
+        ]
+        fileName = None
+        for candidate in candidate_paths:
+            cdir = os.path.dirname(candidate)
+            cfile = os.path.basename(candidate)
+            found = self._find_file_ci(cdir, cfile)
+            if found and os.path.exists(found):
+                fileName = found
+                break
+
+        if not fileName or not os.path.exists(fileName):
             datadirs = [
                 d for d in os.listdir(self.cameradir)
                 if os.path.isdir(os.path.join(self.cameradir, d)) and d.startswith('datadir')
@@ -416,6 +429,8 @@ class libHikvision():
                     blocks = self.info.get('f_blocks', 0)
                     if bsize > 0 and blocks > 0:
                         total_disk_files = (bsize * blocks) // file_size
+                if total_disk_files == 0 and hasattr(self, 'header') and isinstance(self.header, dict):
+                    total_disk_files = self.header.get('totalItems', 0)
                 num_files = max(len(hiv_files), total_disk_files)
             self.detected_num_files = num_files
 
